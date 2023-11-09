@@ -6,88 +6,105 @@
 // modified for attiny13 11.09.23
 // *********************************************
 
+// ATMEL ATTINY / ARDUINO
+//
+//                           +=._.=+
+//  D5/A0/Reset/ADC0/PB5   1=|     |=8  VCC
+//  D3/A3/XTAL1/ADC3/PB3~  2=|     |=7  PB2/SCL/SCK/D2(A1)
+//  D4/A2/XTAL2/ADC2/PB4~  3=|     |=6  PB1~/MISO/D1
+//                    Gnd  4=`-----'=5  PB0~/MOSI/SDA/AREF/D0
+// "~" - PWM pins
+// Attiny13: Has PWM only on PB0 and PB1
+//           No AREF
+//           PB3 and PB4 - the same timer
+// Reset pin - not a good idea to use it as an input, although it's possible
+
 #include <Arduino.h>
 
 // Pinouts
-#define PIN_WELDING_LED 13
 // Potentiometer
-#define PIN_POTENTIOMETER A0
+#define PIN_POTENTIOMETER A2
 // Button
-#define PIN_WELDING_AUTOMATIC_BUTTON 3
-#define PIN_WELDING_MANUAL_BUTTON 4
+#define PIN_WELDING_AUTOMATIC_BUTTON 1
+#define PIN_WELDING_MANUAL_BUTTON 2
 // Relays
-#define PIN_WELDING_RELAY1 5
-#define PIN_WELDING_RELAY2 6
+#define PIN_WELDING_RELAY 3                         //two relays connected to the pin
 
 // Constants
 #define ONE_TICK_DELAY 50
 #define MIN_AUTOMATIC_WELDING_TIME 50
-#define MAX_AUTOMATIC_WELDING_TIME 2000
+#define MAX_AUTOMATIC_WELDING_TIME 1000
 #define MAX_MANUAL_WELDING_TIME 10000
+#define DELAY_AFTER_WELDING 500
+
+//#define DEBUG_SERIAL_PLOTTER
+#define PIN_DEBUG_LED 0                             // led used as operate/debug indicator. nano D13 tiny D0
 
 void setup()
 {
-    Serial.begin(115200);
-    pinMode(PIN_WELDING_LED, OUTPUT);
-    pinMode(PIN_POTENTIOMETER, INPUT);
+    pinMode(PIN_POTENTIOMETER, INPUT);              //pinMode(PIN, INPUT_PULLUP) - use it instead of resistors
     pinMode(PIN_WELDING_AUTOMATIC_BUTTON, INPUT);
     pinMode(PIN_WELDING_MANUAL_BUTTON, INPUT);
-    pinMode(PIN_WELDING_RELAY1, OUTPUT);
-    pinMode(PIN_WELDING_RELAY2, OUTPUT);
-    digitalWrite(PIN_WELDING_RELAY1, HIGH);
-    digitalWrite(PIN_WELDING_RELAY2, HIGH);
+    pinMode(PIN_WELDING_RELAY, OUTPUT);
+    digitalWrite(PIN_WELDING_RELAY, HIGH);          //true/HIGH - relay switched OFF
+#ifdef DEBUG_SERIAL_PLOTTER
+    Serial.begin(9600);
+#endif
+#ifdef PIN_DEBUG_LED
+    pinMode(PIN_DEBUG_LED, OUTPUT);
+#endif
 }
 
 boolean isWeldingDone = true;
-int potentiometerValue = 0;
-int currentAutomaticButtonStatus = 0;
-int prevAutomaticButtonStatus = 0;
-int currentManualButtonStatus = 0;
-int prevManualButtonStatus = 0;
+unsigned int potentiometerValue = 0;
+unsigned int currentAutomaticButtonStatus = 0;
+unsigned int prevAutomaticButtonStatus = 0;
+unsigned int currentManualButtonStatus = 0;
+unsigned int prevManualButtonStatus = 0;
+#ifdef PIN_DEBUG_LED
+boolean debugLedState = true;
+#endif
 
-int getWeldingTime(){
+unsigned int getWeldingTime(){
     potentiometerValue = analogRead(PIN_POTENTIOMETER);
     return map(potentiometerValue,0, 1023, 0, MAX_AUTOMATIC_WELDING_TIME) + MIN_AUTOMATIC_WELDING_TIME;
-    // return potentiometerValue*(MAX_WELDING_TIME/1024) + MIN_AUTOMATIC_WELDING_TIME;
 }
 
 void startAutomaticWelding(){
-    int weldingTime;
+    unsigned int weldingTime;
     weldingTime = getWeldingTime();
+#ifdef DEBUG_SERIAL_PLOTTER
     Serial.print("Automatic welding ");
     Serial.println(weldingTime);
-    digitalWrite(PIN_WELDING_LED, HIGH);
-    digitalWrite(PIN_WELDING_RELAY1, LOW); //welding on
-    digitalWrite(PIN_WELDING_RELAY2, LOW); //welding on
+#endif
+    digitalWrite(PIN_WELDING_RELAY, LOW);       //welding on
     delay(weldingTime);
-    digitalWrite(PIN_WELDING_LED, LOW);
-    digitalWrite(PIN_WELDING_RELAY1, HIGH); //welding off
-    digitalWrite(PIN_WELDING_RELAY2, HIGH); //welding off
+    digitalWrite(PIN_WELDING_RELAY, HIGH);      //welding off
     isWeldingDone = true;
-    Serial.println("Welding done");
+#ifdef DEBUG_SERIAL_PLOTTER
+    Serial.print("Welding done: ");
+    Serial.println(weldingTime);
+#endif
+    delay(DELAY_AFTER_WELDING);
 }
 
-void startManualWelding() {
-    Serial.println("Manual welding");
-    digitalWrite(PIN_WELDING_LED, HIGH);
-    digitalWrite(PIN_WELDING_RELAY1, LOW); //welding on
-    digitalWrite(PIN_WELDING_RELAY2, LOW); //welding on
-    int manualWeldingCounter = 0;
-    while(digitalRead(PIN_WELDING_MANUAL_BUTTON)){
-        manualWeldingCounter += ONE_TICK_DELAY;
-        if(manualWeldingCounter >= MAX_MANUAL_WELDING_TIME){
-            digitalWrite(PIN_WELDING_LED, LOW);
-            digitalWrite(PIN_WELDING_RELAY1, HIGH); //welding off
-            digitalWrite(PIN_WELDING_RELAY2, HIGH); //welding off
-            Serial.println("Manual welding stopped by timer");
-        }
+void startManualWelding(){
+#ifdef DEBUG_SERIAL_PLOTTER
+    Serial.println("Manual welding start");
+#endif
+    digitalWrite(PIN_WELDING_RELAY, LOW);       //welding on
+    unsigned long startWeldingTime = millis();
+    unsigned long currTime = startWeldingTime;
+    while(digitalRead(PIN_WELDING_MANUAL_BUTTON) && currTime  - startWeldingTime < MAX_MANUAL_WELDING_TIME ){
         delay(ONE_TICK_DELAY);
+        currTime = millis();
     }
-    digitalWrite(PIN_WELDING_LED, LOW);
-    digitalWrite(PIN_WELDING_RELAY1, HIGH); //welding off
-    digitalWrite(PIN_WELDING_RELAY2, HIGH); //welding off
-    Serial.println("Manual welding done");
-
+    digitalWrite(PIN_WELDING_RELAY, HIGH);      //welding off
+#ifdef DEBUG_SERIAL_PLOTTER
+    Serial.print("Manual welding done: ");
+    Serial.println(currTime-startWeldingTime);
+#endif
+    delay(DELAY_AFTER_WELDING);
 }
 
 void loop()
@@ -107,5 +124,9 @@ void loop()
 
     prevAutomaticButtonStatus = currentAutomaticButtonStatus;
     prevManualButtonStatus = currentManualButtonStatus;
+
+#ifdef PIN_DEBUG_LED
+    digitalWrite(PIN_DEBUG_LED, debugLedState = !debugLedState);
+#endif
     delay(ONE_TICK_DELAY);
 }
